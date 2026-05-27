@@ -1,0 +1,1705 @@
+<!-- Chosen Palette: Calm Harmony (Warm Neutrals) -->
+<!-- ============================================================
+     ПАНЕЛЬ УПРАВЛЕНИЯ КОНТРОЛЕРА — index.html
+     ============================================================
+     Этот файл содержит ТОЛЬКО HTML-разметку.
+     
+     CSS:  style.css
+     JS:   js/01-db.js         — константы и база данных
+           js/02-utils.js       — утилиты, часы, периоды
+           js/03-charts.js      — графики Chart.js
+           js/04-registry.js    — реестр событий
+           js/05-ui.js          — навигация и поиск
+           js/06-orders.js      — предписания ЦБ/СРО
+           js/07-complaints.js  — жалобы/обращения
+           js/08-checks.js      — журнал проверок
+           js/09-plan.js        — план мероприятий
+           js/10-financials.js  — НДК, НКЛ, собственные средства
+           js/11-conflicts.js   — конфликты интересов
+           js/12-audit.js       — лог аудита
+           js/13-reports.js     — отчёты и экспорт
+           js/14-audit-patches.js — перехватчики для аудита
+           js/15-init.js        — инициализация (подключать ПОСЛЕДНИМ)
+     ============================================================ -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Динамическая Панель Управления Контролера | План 2025</title>
+
+    <!-- Внешние библиотеки -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <!-- Стили приложения -->
+    <link rel="stylesheet" href="style.css?v=bloomberg8">
+</head>
+<body>
+</head>
+<body class="bg-[#FDFBF8] text-[#4B4240] font-sans">
+
+    <nav class="bg-[#4B4240] text-white shadow-lg sticky top-0 z-50">
+    <div class="container mx-auto flex flex-col md:flex-row justify-between items-center p-2">
+       <ul class="flex flex-wrap justify-center md:justify-start items-center" id="navigation">
+    <li><a class="nav-link active" data-target="section-main">Сводка по Рискам</a></li>
+    
+    <li class="relative" id="nav-registries-group">
+        <button class="nav-link flex items-center focus:outline-none" id="registries-btn" onclick="toggleRegistriesMenu(event)">
+            Реестры
+            <span class="ml-1 text-xs" id="registries-arrow">▼</span>
+        </button>
+        <div class="absolute hidden bg-[#4B4240] min-w-[200px] shadow-xl rounded-b-lg overflow-hidden border-t-2 border-[#D9A86E] z-[100]" id="registries-dropdown">
+            <a class="nav-link block px-4 py-3 hover:bg-[#7D7471] text-white text-sm transition cursor-pointer" data-target="section-register">Реестр событий</a>
+            <a class="nav-link block px-4 py-3 hover:bg-[#7D7471] text-white text-sm transition cursor-pointer" data-target="section-orders">Реестр предписаний</a>
+            <a class="nav-link block px-4 py-3 hover:bg-[#7D7471] text-white text-sm transition cursor-pointer" data-target="section-checks">Журнал проверок</a>
+            <a class="nav-link block px-4 py-3 hover:bg-[#7D7471] text-white text-sm transition cursor-pointer" data-target="section-complaints">Журнал обращений</a>
+            <a class="nav-link block px-4 py-3 hover:bg-[#7D7471] text-white text-sm transition cursor-pointer" data-target="section-conflicts">Конфликт интересов</a>
+        </div>
+    </li>
+
+    <li><a class="nav-link-disabled" title="На доработке" onclick="return false;">Квартальный отчет 🚧</a></li>
+    <li><a class="nav-link" data-target="section-financials">Фин. показатели</a></li>
+    <li><a class="nav-link" data-target="section-knowledge">База знаний</a></li>
+    <li><a class="nav-link" data-target="section-cbr-rss" id="nav-cbr-rss">
+        RSS ЦБ <span id="rss-nav-badge" class="ml-1 bg-[#D9A86E] text-white text-xs px-1.5 py-0.5 rounded-full hidden">0</span>
+    </a></li>
+    <li><a class="nav-link" data-target="section-auditlog">Логи</a></li>
+</ul>
+        
+        <div class="flex items-center gap-3 mt-2 md:mt-0">
+            <!-- Глобальный поиск -->
+            <div id="global-search-wrap">
+                <input type="text" id="global-search" placeholder="🔍 Поиск по всему..." autocomplete="off" oninput="handleGlobalSearch(this.value)" onfocus="showSearchPanel()" />
+                <div id="search-results-panel"></div>
+            </div>
+            <!-- Дата/время -->
+            <div class="text-xs md:text-sm text-[#D9A86E] font-mono flex flex-col items-end">
+                <span id="current-date" class="font-bold"></span>
+                <span id="current-time"></span>
+            </div>
+            <!-- Тёмная тема -->
+            <button id="dark-toggle" onclick="toggleDark()" title="Тёмная/светлая тема">
+                <span id="dark-icon">🌙</span>
+                <span id="dark-label">Тема</span>
+            </button>
+        </div>
+    </div>
+</nav>
+
+    <main class="container mx-auto p-4 md:p-8">
+
+        <div id="section-main" class="content-section active">
+            <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Сводка по регуляторному риску</h1>
+            <p class="text-lg text-[#7D7471] mb-6"></p>
+
+            <!-- ===== АЛЕРТ-БАННЕРЫ ===== -->
+            <div id="alert-banners" class="mb-6 flex flex-col gap-3"></div>
+
+            <div class="flex flex-wrap gap-3 mb-6">
+    <button onclick="downloadBackup()" class="flex items-center bg-[#4B4240] text-white py-2 px-4 rounded-lg hover:bg-[#2c2625] transition duration-200 text-sm shadow-sm" title="Сохранить полную копию базы данных (JSON)">
+        <span class="mr-2">&#128190;</span> Скачать Backup
+    </button>
+    
+    <button onclick="document.getElementById('restore-input-main').click()" class="flex items-center border border-[#4B4240] text-[#4B4240] bg-transparent py-2 px-4 rounded-lg hover:bg-[#EFEFEF] transition duration-200 text-sm shadow-sm" title="Восстановить базу данных из файла">
+        <span class="mr-2">&#128229;</span> Загрузить Backup
+    </button>
+
+    <div class="flex items-center gap-2">
+        <label class="text-sm text-[#7D7471]">Квартал PDF:</label>
+        <select id="pdf-quarter-select" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+            <option value="">Все время</option>
+        </select>
+    </div>
+    <button onclick="exportDashboardPDF()" class="flex items-center bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800 transition duration-200 text-sm shadow-sm" title="Экспорт сводного отчёта в PDF">
+        <span class="mr-2">📄</span> PDF
+    </button>
+    
+    <input type="file" id="restore-input-main" style="display: none;" accept=".json" onchange="restoreBackup(this)">
+</div>
+            <div class="mb-8 p-4 bg-white rounded-lg shadow-md flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0 md:space-x-6">
+                <h3 class="text-md font-semibold text-[#4B4240] whitespace-nowrap">Сравнение Периодов:</h3>
+                <div class="flex items-center space-x-3 w-full md:w-auto">
+    <label for="period1" class="text-[#7D7471] text-sm">Период 1:</label>
+    <select id="period1" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+        <optgroup label="Кварталы">
+        </optgroup>
+        <optgroup label="Месяцы">
+        </optgroup>
+    </select>
+</div>
+<div class="flex items-center space-x-3 w-full md:w-auto">
+    <label for="period2" class="text-[#7D7471] text-sm">Период 2:</label>
+    <select id="period2" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+        <optgroup label="Кварталы">
+        </optgroup>
+        <optgroup label="Месяцы">
+        </optgroup>
+    </select>
+</div>
+                <button onclick="updateMetrics()" class="w-full md:w-auto bg-[#D9A86E] text-white py-2 px-4 rounded-lg hover:bg-[#A69C97] transition duration-200 text-sm">Сравнить</button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                    <h3 class="text-xs font-semibold text-[#7D7471] uppercase mb-2">Всего Выявлено Событий</h3>
+                    <p class="text-4xl font-bold text-[#4B4240]" id="metric-total-events">0</p>
+                    <span class="text-sm text-[#8C7D6F] flex justify-center items-center" id="metric-total-diff">vs 0 (P1)</span>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                    <h3 class="text-xs font-semibold text-[#7D7471] uppercase mb-2">Из Них Существенных (ПВК п.6)</h3>
+                    <p class="text-4xl font-bold text-[#D9A86E]" id="metric-substantial-events">0</p>
+                    <span class="text-sm text-[#8C7D6F] flex justify-center items-center" id="metric-substantial-diff">vs 0 (P1)</span>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                    <h3 class="text-xs font-semibold text-[#7D7471] uppercase mb-2">Событий в Работе</h3>
+                    <p class="text-4xl font-bold text-orange-500" id="metric-inprogress-events">0</p>
+                    <span class="text-sm text-[#8C7D6F] flex justify-center items-center" id="metric-inprogress-diff">vs 0 (P1)</span>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                    <h3 class="text-xs font-semibold text-[#7D7471] uppercase mb-2">Событий Устранено</h3>
+                    <p class="text-4xl font-bold text-green-600" id="metric-resolved-events">0</p>
+                    <span class="text-sm text-[#8C7D6F] flex justify-center items-center" id="metric-resolved-diff">vs 0 (P1)</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">Сравнение KPI по кварталам</h2>
+                    <p class="text-sm text-[#7D7471] mb-4">Динамика ключевых метрик по выбранным кварталам.</p>
+                    <div class="chart-container w-full mx-auto h-[300px]">
+                        <canvas id="kpiComparisonChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <!-- Заголовок + фильтры -->
+                    <div class="flex flex-col gap-3 mb-4">
+                        <h2 class="text-xl font-semibold">График Событий (Диаграмма Ганта)</h2>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div class="flex flex-col">
+                                <label class="text-xs font-bold text-[#7D7471] mb-1">Период</label>
+                                <select id="gantt-quarter-select" onchange="updateGanttChart(this.value)" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+                                </select>
+                            </div>
+                            <div class="flex flex-col">
+                                <label class="text-xs font-bold text-[#7D7471] mb-1">Группа таксономии</label>
+                                <select id="gantt-taxonomy-filter" onchange="updateGanttChart()" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+                                    <option value="">Все группы</option>
+                                    <option value="1.">1. Мошенничество</option>
+                                    <option value="2.">2. Нарушения по сотрудникам</option>
+                                    <option value="3.">3. Корп. управление</option>
+                                    <option value="4.">4. ПОД/ФТ/Санкции</option>
+                                    <option value="5.">5. Нарушения регулирования</option>
+                                    <option value="6.">6. Обслуживание клиентов</option>
+                                    <option value="7.">7. Данные/ИБ</option>
+                                    <option value="8.">8. Риск продуктов</option>
+                                    <option value="9.">9. Технологический риск</option>
+                                    <option value="10.">10. Непрерывность/Аутсорсинг</option>
+                                    <option value="11.">11. Финотчётность</option>
+                                    <option value="12.">12. Риск-менеджмент</option>
+                                </select>
+                            </div>
+                            <div class="flex flex-col">
+                                <label class="text-xs font-bold text-[#7D7471] mb-1">Показывать</label>
+                                <select id="gantt-status-filter" onchange="updateGanttChart()" class="p-2 border border-[#A69C97] rounded text-[#4B4240] bg-white text-sm">
+                                    <option value="">Все статусы</option>
+                                    <option value="Выявлено">Выявлено</option>
+                                    <option value="В работе">В работе</option>
+                                    <option value="Устранено">Устранено</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Легенда -->
+                        <div class="flex flex-wrap gap-4 text-xs text-[#7D7471]">
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#E74C3C"></span>Выявлено</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#F39C12"></span>В работе</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#2ECC71"></span>Устранено</span>
+                            <span class="flex items-center gap-1 ml-2 border-l pl-3">Насыщенность цвета = рейтинг риска (1–5)</span>
+                            <span class="flex items-center gap-1">⚠ = существенное событие</span>
+                        </div>
+                        <p class="text-xs text-[#A69C97]"></p>
+                    </div>
+                    <div style="position:relative; width:100%; height:400px;">
+                        <canvas id="ganttChart"></canvas>
+                    </div>
+                    <div id="gantt-empty" class="hidden text-center text-[#A69C97] italic py-8">Нет событий за выбранный период</div>
+                </div>
+            </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 mt-12">
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">Общий статус устранения рисков</h2>
+                    <div class="chart-container w-full mx-auto h-[300px]">
+                        <canvas id="riskStatusChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">События по таксономии (За все время)</h2>
+                    <div class="chart-container w-full mx-auto h-[300px]">
+                        <canvas id="riskTaxonomyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== ШАБЛОН ПИСЬМА В ЦБ (п. 2.1.12) ===== -->
+            <div class="bg-white p-6 rounded-xl shadow-md mt-8 border-l-4 border-red-500">
+                <div class="flex justify-between items-start flex-wrap gap-3 mb-4">
+                    <div>
+                        <h2 class="text-xl font-semibold">📨 Шаблон уведомления в Банк России (п. 2.1.12 Указания № 5683-У)</h2>
+                        <p class="text-sm text-[#7D7471] mt-1">Автоматически заполняется данными о существенных событиях из реестра. Срок направления — не позднее 2 рабочих дней.</p>
+                    </div>
+                    <div class="flex gap-2 flex-wrap">
+                        <select id="cb-event-select" class="p-2 border border-[#A69C97] rounded bg-white text-sm min-w-[240px]">
+                            <option value="">— Выберите существенное событие —</option>
+                        </select>
+                        <button onclick="fillCBLetter()" class="bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800 transition text-sm font-semibold">Заполнить шаблон</button>
+                    </div>
+                </div>
+                <div id="cb-letter-output" class="hidden">
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-5 font-mono text-sm leading-relaxed whitespace-pre-wrap" id="cb-letter-text"></div>
+                    <div class="flex gap-3 mt-4">
+                        <button onclick="copyCBLetter()" class="bg-[#4B4240] text-white py-2 px-4 rounded-lg hover:bg-[#2c2625] transition text-sm">📋 Скопировать текст</button>
+                        <button onclick="printCBLetter()" class="border border-[#4B4240] text-[#4B4240] py-2 px-4 rounded-lg hover:bg-gray-100 transition text-sm">🖨 Распечатать</button>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /section-main -->
+
+        <div id="section-register" class="content-section">
+            <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Реестр событий Регуляторного риска</h1>
+            <p class="text-lg text-[#7D7471] mb-6">Ввод и управление жизненным циклом событий (Выявление, Устранение).</p>
+            
+            <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Добавить новое событие риска</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex flex-col">
+                        <label for="reg-event-date" class="text-sm mb-1 font-bold text-[#4B4240]">Дата события (возникновения):</label>
+                        <input type="date" id="reg-event-date" class="p-2 border border-[#A69C97] rounded">
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="reg-date" class="text-sm mb-1">Дата обнаружения:</label>
+                        <input type="date" id="reg-date" class="p-2 border border-[#A69C97] rounded">
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="reg-has-order" class="text-sm mb-1 font-bold text-[#4B4240]">Наличие предписания ЦБ/СРО:</label>
+                        <select id="reg-has-order" class="p-2 border border-[#A69C97] rounded bg-white">
+                        <option value="Нет">Нет</option>
+                        <option value="Да">Да</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="reg-source" class="text-sm mb-1">Источник:</label>
+                        <select id="reg-source" class="p-2 border border-[#A69C97] rounded bg-white">
+                            <option value="Внутренняя проверка">Внутренняя проверка</option>
+                            <option value="Жалоба клиента">Жалоба клиента</option>
+                            <option value="Запрос ЦБ/СРО">Запрос ЦБ/СРО</option>
+                            <option value="Прочее">Прочее</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col md:col-span-2">
+                        <label for="reg-description" class="text-sm mb-1">Описание события:</label>
+                        <input type="text" id="reg-description" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., Некорректное риск-профилирование...">
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="reg-taxonomy" class="text-sm mb-1">Таксономия:</label>
+                        <select id="reg-taxonomy" class="p-2 border border-[#A69C97] rounded bg-white">
+                            <optgroup label="1. Воровство, мошенничество и неавторизованная деятельность">
+                                <option value="1.1. Воровство, мошенничество и неавторизованная деятельность со стороны сотрудников Организации">1.1. Воровство, мошенничество и неавторизованная деятельность со стороны сотрудников Организации</option>
+                                <option value="1.2. Внешнее воровство и мошенничество (клиенты и третьи лица)">1.2. Внешнее воровство и мошенничество (клиенты и третьи лица)</option>
+                            </optgroup>
+                            <optgroup label="2. Нарушение требований к сотрудникам">
+                                <option value="2.1. Правовое регулирование труд. отношений">2.1. Правовое регулирование труд. отношений</option>
+                                <option value="2.2. Квалификационные, лицензионные и этические требования">2.2. Квалификационные, лицензионные и этические требования</option>
+                            </optgroup>
+                            <optgroup label="3. Корпоративное управление">
+                                <option value="3.1. Требования к корп. структуре">3.1. Требования к корп. структуре</option>
+                                <option value="3.2. Управленческий контроль">3.2. Управленческий контроль</option>
+                                <option value="3.3. Управление и реализация бизнес-инициатив">3.3. Управление и реализация бизнес-инициатив</option>
+                                <option value="3.4. Установленные корпоративные процессы по рассмотрению жалоб">3.4. Установленные корпоративные процессы по рассмотрению жалоб</option>
+                            </optgroup>
+                            <optgroup label="4. Противодействие отмыванию денежных средств, финансированию терроризма, распространения оружия массового уничтожения, коррупции и соблюдение санкционных требований">
+                                <option value="4.1. Программы идентификации клиента (ПОД/ФТ)">4.1. Программы идентификации клиента (ПОД/ФТ)</option>
+                                <option value="4.2. Санкции и эмбарго">4.2. Санкции и эмбарго</option>
+                                <option value="4.3. Противодействие коррупции">4.3. Противодействие коррупции</option>
+                            </optgroup>
+                            <optgroup label="5. Совершение нарушений в области регулирования финансовых рынков и применение недобросовестных практик">
+                                <option value="5.1. Недобросовестное исп. инсайдерской инф.">5.1. Недобросовестное исп. инсайдерской инф.</option>
+                                <option value="5.2. Манипулирование рынком">5.2. Манипулирование рынком</option>
+                                <option value="5.3. Нарушение регуляторных требований, предъявляемых к осуществлению деятельности и операциям на финансовых рынках">5.3. Нарушение регуляторных требований, предъявляемых к осуществлению деятельности и операциям на финансовых рынках"</option>
+                            </optgroup>
+                            <optgroup label="6. Обслуживание и взаимодействие с клиентами">
+                                <option value="6.1. Соответствие предлагаемых продуктов и услуг целям и квалификации клиента">6.1. Соответствие предлагаемых продуктов... (профилирование)</option>
+                                <option value="6.2. Конфликт интересов между Организацией и ее клиентом или между несколькими клиентами">6.2. Конфликт интересов между Организацией и ее клиентом или между несколькими клиентами</option>
+                            </optgroup>
+                            <optgroup label="7. Использование, хранение и защита данных, информационная безопасность">
+                                <option value="7.1. Защита данных (внутр. угрозы)">7.1. Защита данных (внутр. угрозы)</option>
+                                <option value="7.2. Использование, хранение и уничтожение информации">7.2. Использование, хранение и уничтожение информации</option>
+                                <option value="7.3. Противодействие внешним угрозам (киберпреступления)">7.3. Противодействие внешним угрозам (киберпреступления)</option>
+                            </optgroup>
+                            <optgroup label="8. Риск продуктов и услуг">
+                                <option value="8.1. Предлагаемые продукты и услуги">8.1. Предлагаемые продукты и услуги</option>
+                                <option value="8.2. Риск управления/распоряжения клиентскими активами">8.2. Риск управления/распоряжения клиентскими активами</option>
+                            </optgroup>
+                            <optgroup label="9. Технологический риск">
+                                <option value="9.1. Используемые программы и технологии">9.1. Используемые программы и технологии</option>
+                                <option value="9.2. Внесение изменений в используемые программы">9.2. Внесение изменений в используемые программы</option>
+                            </optgroup>
+                            <optgroup label="10. Непрерывность ведения деятельности и риски аутсорсинга">
+                                <option value="10.1. Риск внутригруппового аутсорсинга">10.1. Риск внутригруппового аутсорсинга</option>
+                                <option value="10.2. Риск, связанный с возникновением зависимости от поставщика услуг">10.2. Риск, связанный с возникновением зависимости от поставщика услуг</option>
+                                <option value="10.3. Риск, связанный с возможностью прерывания деятельности">10.3. Риск, связанный с возможностью прерывания деятельности</option>
+                            </optgroup>
+                            <optgroup label="11. Финансовые нормативы и отчетность">
+                                <option value="11.1. Финансовые нормативы">11.1. Финансовые нормативы</option>
+                                <option value="11.2. Финансовая отчетность">11.2. Финансовая отчетность</option>
+                                <option value="11.3. Регуляторная отчетность">11.3. Регуляторная отчетность</option>
+                            </optgroup>
+                            <optgroup label="12. Риск менеджмент и контроль">
+                                <option value="12.1. Рыночный риск">12.1. Рыночный риск</option>
+                                <option value="12.2. Кредитный риск">12.2. Кредитный риск</option>
+                                <option value="12.3. Риск ликвидности">12.3. Риск ликвидности</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                            <label for="reg-risk-rating" class="text-sm mb-1 font-bold text-[#4B4240]">Рейтинг риска (1-5):</label>
+                            <select id="reg-risk-rating" class="p-2 border border-[#A69C97] rounded bg-white">
+                            <option value="1">1 - Низкий</option>
+                            <option value="2">2 - Умеренный</option>
+                            <option value="3">3 - Средний</option>
+                            <option value="4">4 - Высокий</option>
+                            <option value="5">5 - Критический</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <label class="flex items-center space-x-2 mt-4">
+                            <input type="checkbox" id="reg-substantial" class="h-5 w-5 rounded text-[#D9A86E] focus:ring-[#D9A86E]">
+                            <div class="tooltip-container">
+                                <span>Существенное событие</span>
+                                <span class="tooltip-trigger">i</span>
+                                <div class="tooltip-content">
+                                    <h4 class="font-bold mb-2">Критерии Существенного События (ПВК п. 6):</h4>
+                                    <p class="text-sm mb-2">События признаются существенными, если они способны привести к одному из следующих последствий:</p>
+                                    <ul class="text-xs">
+                                        <li>Снижение размера собственных средств ниже минимального размера;</li>
+                                        <li>Наступление оснований для применения мер по предупреждению банкротства;</li>
+                                        <li>Наступление оснований для аннулирования лицензии;</li>
+                                        <li>Невозможность непрерывного осуществления профессиональной деятельности.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="md:col-span-2 mt-4 border-t border-gray-200 pt-4">
+    <h3 class="text-md font-semibold text-[#4B4240] mb-3">Меры реагирования и контроль (Заполняется по мере выполнения)</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        <div class="flex flex-col md:col-span-2">
+            <label for="reg-measures" class="text-sm mb-1 font-medium">Мероприятия по предупреждению/предотвращению:</label>
+            <input type="text" id="reg-measures" class="p-2 border border-[#A69C97] rounded" placeholder="Описание мероприятий...">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-measures-done" class="text-sm mb-1">Отметка о реализации мероприятий:</label>
+            <select id="reg-measures-done" class="p-2 border border-[#A69C97] rounded bg-white">
+                <option value="Нет">Нет / Не требуется</option>
+                <option value="В процессе">В процессе</option>
+                <option value="Выполнено">Выполнено</option>
+            </select>
+        </div>
+
+        <div class="hidden md:block"></div>
+
+        <div class="flex flex-col">
+            <label for="reg-remedy-mark" class="text-sm mb-1">Отметка об устранении обстоятельств:</label>
+            <select id="reg-remedy-mark" class="p-2 border border-[#A69C97] rounded bg-white">
+                <option value="Нет">Нет</option>
+                <option value="Да">Да, устранено</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label for="reg-remedy-date" class="text-sm mb-1">Дата устранения:</label>
+            <input type="date" id="reg-remedy-date" class="p-2 border border-[#A69C97] rounded">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-responsible" class="text-sm mb-1 font-bold text-[#4B4240]">Ответственный за устранение:</label>
+            <input type="text" id="reg-responsible" class="p-2 border border-[#A69C97] rounded" placeholder="Иванов И.И.">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-deadline" class="text-sm mb-1 font-bold text-red-600">Срок устранения (Дедлайн):</label>
+            <input type="date" id="reg-deadline" class="p-2 border border-red-300 rounded bg-red-50">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-prevention-mark" class="text-sm mb-1">Меры по предотвр. повторов (Отметка):</label>
+            <select id="reg-prevention-mark" class="p-2 border border-[#A69C97] rounded bg-white">
+                <option value="Нет">Нет</option>
+                <option value="Приняты">Меры приняты</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label for="reg-prevention-date" class="text-sm mb-1">Дата принятия мер:</label>
+            <input type="date" id="reg-prevention-date" class="p-2 border border-[#A69C97] rounded">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-order-mark" class="text-sm mb-1">Исполнение предписаний ЦБ/СРО:</label>
+            <select id="reg-order-mark" class="p-2 border border-[#A69C97] rounded bg-white">
+                <option value="Не применимо">Не применимо</option>
+                <option value="В работе">В работе</option>
+                <option value="Исполнено">Исполнено</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label for="reg-order-date" class="text-sm mb-1">Дата исполнения:</label>
+            <input type="date" id="reg-order-date" class="p-2 border border-[#A69C97] rounded">
+        </div>
+
+        <div class="flex flex-col">
+            <label for="reg-recurrence" class="text-sm mb-1 font-bold text-purple-700">Вероятность повторения (п. 2.1.5):</label>
+            <select id="reg-recurrence" class="p-2 border border-purple-300 rounded bg-purple-50">
+                <option value="Не оценена">Не оценена</option>
+                <option value="Низкая">🟢 Низкая — единичный случай</option>
+                <option value="Средняя">🟡 Средняя — системная причина частично устранена</option>
+                <option value="Высокая">🔴 Высокая — системная причина не устранена</option>
+            </select>
+        </div>
+    </div>
+</div>
+                </div>
+                <div class="flex space-x-4 mt-6">
+    <button id="btn-save" onclick="saveRiskEvent()" class="bg-[#4B4240] text-white py-2 px-6 rounded-lg hover:bg-[#7D7471] transition duration-200">
+        Добавить в реестр
+    </button>
+    <button id="btn-cancel" onclick="resetForm()" class="hidden bg-gray-300 text-[#4B4240] py-2 px-6 rounded-lg hover:bg-gray-400 transition duration-200">
+        Отмена
+    </button>
+</div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
+                <h2 class="text-xl font-semibold mb-4">Текущий Реестр</h2> <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+    
+    <button onclick="exportToExcelFormatted()" class="flex items-center bg-[#27AE60] text-white py-2 px-4 rounded-lg hover:bg-[#219150] transition duration-200 text-sm font-bold shadow-sm">
+        <span class="mr-2">&#128196;</span> Скачать Excel (.xlsx)
+    </button>
+</div>
+<!-- ФИЛЬТРЫ РЕЕСТРА -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 p-3 bg-[#FDFBF8] border border-[#A69C97] rounded-lg">
+    <div class="flex flex-col">
+        <label class="text-xs font-bold text-[#7D7471] mb-1">Фильтр: Статус</label>
+        <select id="filter-status" onchange="filterAndRenderRegister()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+            <option value="">Все статусы</option>
+            <option value="Выявлено">Выявлено</option>
+            <option value="В работе">В работе</option>
+            <option value="Устранено">Устранено</option>
+            <option value="Просрочено">⚠ Просрочено</option>
+        </select>
+    </div>
+    <div class="flex flex-col">
+        <label class="text-xs font-bold text-[#7D7471] mb-1">Фильтр: Существенные</label>
+        <select id="filter-substantial" onchange="filterAndRenderRegister()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+            <option value="">Все</option>
+            <option value="true">Только существенные</option>
+            <option value="false">Несущественные</option>
+        </select>
+    </div>
+    <div class="flex flex-col">
+        <label class="text-xs font-bold text-[#7D7471] mb-1">Фильтр: Таксономия (группа)</label>
+        <select id="filter-taxonomy" onchange="filterAndRenderRegister()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+            <option value="">Все</option>
+            <option value="1.">1. Мошенничество</option>
+            <option value="2.">2. Нарушения по сотрудникам</option>
+            <option value="3.">3. Корп. управление</option>
+            <option value="4.">4. ПОД/ФТ/Санкции</option>
+            <option value="5.">5. Нарушения регулирования</option>
+            <option value="6.">6. Обслуживание клиентов</option>
+            <option value="7.">7. Данные/ИБ</option>
+            <option value="8.">8. Риск продуктов</option>
+            <option value="9.">9. Технологический риск</option>
+            <option value="10.">10. Непрерывность/Аутсорсинг</option>
+            <option value="11.">11. Финотчетность</option>
+            <option value="12.">12. Риск-менеджмент</option>
+        </select>
+    </div>
+    <div class="flex flex-col">
+        <label class="text-xs font-bold text-[#7D7471] mb-1">Поиск по описанию</label>
+        <input type="text" id="filter-search" oninput="filterAndRenderRegister()" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="Ключевое слово...">
+    </div>
+</div>
+                <table class="w-full min-w-max text-left">
+                    <thead class="border-b border-[#A69C97]">
+                        <tr>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Дата события</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Дата выявления</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Описание</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Таксономия</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Существенное</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Рейтинг</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Статус</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Дедлайн</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Ответственный</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Предписание (Наличие)</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Мероприятия</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Исп. предписаний</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Вер. повторения</th>
+                        <th class="p-3 text-sm font-semibold text-[#7D7471]">Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody id="risk-register-table">
+                        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div id="section-orders" class="content-section">
+            <div class="flex justify-end mb-4">
+    <button onclick="exportOrdersToExcel()" class="flex items-center bg-[#217346] text-white py-2 px-4 rounded-lg hover:bg-[#1a5a37] transition duration-200 text-sm font-bold shadow-sm">
+        <span class="mr-2">📊</span> Скачать Excel Предписаний
+    </button>
+</div>
+    <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Реестр Предписаний и Запросов</h1>
+    <p class="text-lg text-[#7D7471] mb-6">Учет входящих запросов регуляторов и контроль сроков их исполнения.</p>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h2 class="text-xl font-semibold mb-4" id="ord-form-title">Регистрация нового документа</h2>
+
+        <!-- Блок дочернего предписания (скрыт по умолчанию) -->
+        <div id="ord-child-block" class="hidden mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="text-blue-600 text-lg font-bold">⤷</span>
+                <span class="text-sm font-bold text-blue-700">Дочернее предписание</span>
+                <span class="text-xs text-blue-500" id="ord-parent-ref"></span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="flex flex-col md:col-span-2">
+                    <label class="text-sm mb-1 font-bold text-blue-700">№ основного предписания:</label>
+                    <input type="text" id="ord-parent-number-display" class="p-2 border border-blue-300 rounded bg-white" placeholder="Авто из родителя" readonly>
+                </div>
+                <div class="flex flex-col md:col-span-2">
+                    <label class="text-sm mb-1 font-bold text-red-600">Причина неисполнения:</label>
+                    <textarea id="ord-noncompliance-reason" rows="2" class="p-2 border border-red-200 rounded bg-red-50" placeholder="Укажите причину — ответ признан ненадлежащим, документы не приняты и т.д."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Входящий № <span id="ord-number-hint" class="text-blue-500 text-xs hidden">(только суффикс, напр. /2159)</span>:</label>
+                <input type="text" id="ord-number" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., 54-2/102">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Дата получения:</label>
+                <input type="date" id="ord-date-in" class="p-2 border border-[#A69C97] rounded">
+            </div>
+           <div class="flex flex-col md:col-span-2">
+    <label class="text-sm mb-1 font-bold text-blue-600">Ссылка на документ:</label>
+    <input type="url" id="ord-link" class="p-2 border border-blue-300 rounded bg-blue-50" placeholder="...">
+</div>
+            
+            <div class="flex flex-col md:col-span-3">
+                <label class="text-sm mb-1">Суть требования / запроса:</label>
+                <input type="text" id="ord-description" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., Предоставить реестр сделок за 3 квартал...">
+            </div>
+
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold text-red-600">Срок исполнения (Дедлайн):</label>
+                <input type="date" id="ord-deadline" class="p-2 border border-red-300 rounded bg-red-50">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Ответственный:</label>
+                <input type="text" id="ord-responsible" class="p-2 border border-[#A69C97] rounded" placeholder="Иванов И.И.">
+            </div>
+             <div class="flex flex-col">
+    <label class="text-sm mb-1 font-bold">Текущий Статус:</label>
+    <select id="ord-status" class="p-2 border border-[#A69C97] rounded bg-white">
+        <option value="В работе">В работе</option>
+        <option value="На согласовании">На согласовании</option>
+        <option value="Отправлено">Отправлено</option>
+        <option value="Исполнено">Исполнено</option>
+        <option value="Не исполнено">Не исполнено / Отказ</option>
+        <option value="Просрочено">Просрочено</option>
+    </select>
+</div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Дата исполнения (факт):</label>
+                <input type="date" id="ord-date-done" class="p-2 border border-[#A69C97] rounded">
+            </div>
+        </div>
+        
+        <input type="hidden" id="ord-parent-id" value="">
+        <div class="flex space-x-4 mt-6">
+            <button onclick="saveOrder()" class="bg-[#4B4240] text-white py-2 px-6 rounded-lg hover:bg-[#7D7471] transition">Сохранить</button>
+            <button onclick="resetOrderForm()" class="bg-gray-300 text-black py-2 px-6 rounded-lg hover:bg-gray-400 transition">Очистить</button>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
+        <h2 class="text-xl font-semibold mb-4">Журнал Предписаний</h2>
+        <table class="w-full min-w-max text-left border-collapse">
+            <thead class="bg-gray-100 border-b-2 border-gray-300">
+                <tr>
+                    <th class="p-3 text-sm">Вх. №</th>
+                    <th class="p-3 text-sm">Дата получения</th>
+                    <th class="p-3 text-sm">Суть запроса</th>
+                    <th class="p-3 text-sm text-red-600">Дедлайн</th>
+                    <th class="p-3 text-sm">Статус</th>
+                    <th class="p-3 text-sm">Дата исп.</th>
+                    <th class="p-3 text-sm text-blue-600">Тип</th>
+                    <th class="p-3 text-sm">Действия</th>
+                </tr>
+            </thead>
+            <tbody id="orders-table-body"></tbody>
+        </table>
+    </div>
+</div>
+        <div id="section-checks" class="content-section">
+    <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Проверки</h1>
+    <p class="text-lg text-[#7D7471] mb-6">Журнал фактических проверок (п. 1.3, 8 ПВК).</p>
+
+    <!-- Вкладки: план / журнал -->
+    <div class="flex gap-2 mb-6 border-b border-[#E0E0E0]">
+        
+        <button id="tab-log" onclick="switchChecksTab('log')" class="px-5 py-2 text-sm font-semibold border-b-2 border-[#D9A86E] text-[#D9A86E] transition">📋 Журнал проверок</button>
+    </div>
+
+    <!-- ===== ГОДОВОЙ ПЛАН ===== -->
+    <div id="checks-log-panel">
+        <!-- KPI карточки -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-[#4B4240]">
+                <p class="text-2xl font-bold text-[#4B4240]" id="chk-stat-total">0</p>
+                <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Всего проверок</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-green-500">
+                <p class="text-2xl font-bold text-green-600" id="chk-stat-ok">0</p>
+                <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Без нарушений</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-red-500">
+                <p class="text-2xl font-bold text-red-600" id="chk-stat-violations">0</p>
+                <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Выявлены нарушения</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-yellow-400">
+                <p class="text-2xl font-bold text-yellow-600" id="chk-stat-open">0</p>
+                <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Не устранены</p>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-[#D9A86E]">
+            <h2 class="text-xl font-semibold mb-4" id="chk-form-title">Регистрация проверки</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1 font-bold">Тип проверки:</label>
+                    <select id="chk-type" class="p-2 border border-[#A69C97] rounded bg-white">
+                        <option value="Проверка прав клиентов (п. 1.3)">Проверка прав клиентов (п. 1.3)</option>
+                        <option value="Проверка рекламы (п. 8)">Проверка рекламы (п. 8)</option>
+                        <option value="Проверка ПОД/ФТ">Проверка ПОД/ФТ</option>
+                        <option value="Проверка регуляторной отчётности">Проверка регуляторной отчётности</option>
+                        <option value="Проверка управления рисками">Проверка управления рисками</option>
+                        <option value="Проверка конфликта интересов">Проверка конфликта интересов</option>
+                        <option value="Внеплановая проверка">Внеплановая проверка</option>
+                        <option value="Проверка ЦБ/СРО">Проверка ЦБ/СРО</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1 font-bold">Дата проведения:</label>
+                    <input type="date" id="chk-date" class="p-2 border border-[#A69C97] rounded">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1">Проверяющий:</label>
+                    <input type="text" id="chk-inspector" class="p-2 border border-[#A69C97] rounded" placeholder="Иванов И.И.">
+                </div>
+                <div class="flex flex-col md:col-span-2">
+                    <label class="text-sm mb-1 font-bold">Объект проверки:</label>
+                    <input type="text" id="chk-object" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., 10 досье клиентов за Q1 2026, сайт компании...">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1">Результат:</label>
+                    <select id="chk-result" class="p-2 border border-[#A69C97] rounded bg-white">
+                        <option value="Нарушений не выявлено">Нарушений не выявлено</option>
+                        <option value="Выявлены нарушения">Выявлены нарушения</option>
+                        <option value="Требует доработки">Требует доработки</option>
+                    </select>
+                </div>
+                <div class="flex flex-col md:col-span-3">
+                    <label class="text-sm mb-1 text-red-600 font-bold">Выявленные нарушения / замечания:</label>
+                    <textarea id="chk-findings" rows="2" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="Опишите выявленные нарушения (если есть)..."></textarea>
+                </div>
+                <div class="flex flex-col md:col-span-2">
+                    <label class="text-sm mb-1">Принятые меры / план устранения:</label>
+                    <input type="text" id="chk-measures" class="p-2 border border-[#A69C97] rounded" placeholder="Что сделано или запланировано для устранения...">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1">Статус устранения:</label>
+                    <select id="chk-fix-status" class="p-2 border border-[#A69C97] rounded bg-white">
+                        <option value="Не применимо">Не применимо</option>
+                        <option value="В работе">В работе</option>
+                        <option value="Устранено">Устранено</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm mb-1 text-blue-600 font-bold">Ссылка на Акт (Облако):</label>
+                    <input type="url" id="chk-link" class="p-2 border border-blue-200 rounded bg-blue-50" placeholder="https://...">
+                </div>
+            </div>
+            <input type="hidden" id="chk-editing-id">
+            <div class="flex gap-3 mt-5">
+                <button onclick="saveCheckRecord()" class="bg-[#4B4240] text-white py-2 px-6 rounded-lg hover:bg-[#7D7471] transition font-semibold">Зафиксировать проверку</button>
+                <button onclick="resetCheckForm()" id="chk-cancel-btn" class="hidden bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition">Отмена</button>
+            </div>
+        </div>
+
+        <!-- Фильтры -->
+        <div class="bg-white p-4 rounded-xl shadow-sm mb-4 flex flex-wrap gap-3 items-end">
+            <div class="flex flex-col">
+                <label class="text-xs text-[#7D7471] mb-1">Тип проверки</label>
+                <select id="chk-filter-type" onchange="renderCheckRecords()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                    <option value="">Все типы</option>
+                    <option value="Проверка прав клиентов (п. 1.3)">Права клиентов</option>
+                    <option value="Проверка рекламы (п. 8)">Реклама</option>
+                    <option value="Проверка ПОД/ФТ">ПОД/ФТ</option>
+                    <option value="Проверка регуляторной отчётности">Рег. отчётность</option>
+                    <option value="Проверка управления рисками">Управление рисками</option>
+                    <option value="Проверка конфликта интересов">Конфликт интересов</option>
+                    <option value="Внеплановая проверка">Внеплановая</option>
+                    <option value="Проверка ЦБ/СРО">ЦБ/СРО</option>
+                </select>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-xs text-[#7D7471] mb-1">Результат</label>
+                <select id="chk-filter-result" onchange="renderCheckRecords()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                    <option value="">Все результаты</option>
+                    <option value="Нарушений не выявлено">Без нарушений</option>
+                    <option value="Выявлены нарушения">Нарушения</option>
+                    <option value="Требует доработки">Требует доработки</option>
+                </select>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-xs text-[#7D7471] mb-1">Период с</label>
+                <input type="date" id="chk-filter-from" onchange="renderCheckRecords()" class="p-2 border border-[#A69C97] rounded text-sm">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-xs text-[#7D7471] mb-1">по</label>
+                <input type="date" id="chk-filter-to" onchange="renderCheckRecords()" class="p-2 border border-[#A69C97] rounded text-sm">
+            </div>
+            <button onclick="clearCheckFilters()" class="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200 transition">Сбросить</button>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-md overflow-x-auto">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+                <h2 class="text-xl font-semibold">Реестр проведённых проверок</h2>
+                <span class="text-sm text-[#7D7471]" id="chk-count-label"></span>
+            </div>
+            <table class="w-full min-w-max text-left border-collapse">
+                <thead class="bg-gray-50 border-b-2 border-gray-200">
+                    <tr>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Дата</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Тип проверки</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Объект</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Проверяющий</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Результат</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Нарушения / меры</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Устранение</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Акт</th>
+                        <th class="p-3 text-xs font-bold text-[#7D7471]">Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="checks-table-body"></tbody>
+            </table>
+        </div>
+    </div> <!-- конец checks-log-panel -->
+</div>
+
+        <div id="section-complaints" class="content-section">
+    <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Журнал обращений (жалоб)</h1>
+    <p class="text-lg text-[#7D7471] mb-6">Учет обращений, связанных с профессиональной деятельностью (п. 1.9, п. 2.1.8 Указания № 5683-У).</p>
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8 border-l-4 border-[#D9A86E]">
+        <h2 class="text-xl font-semibold mb-4">Зарегистрировать обращение</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Дата получения:</label>
+                <input type="date" id="cmp-date" class="p-2 border border-[#A69C97] rounded">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold text-red-600">Срок рассмотрения (Дедлайн):</label>
+                <input type="date" id="cmp-deadline" class="p-2 border border-red-300 rounded bg-red-50">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Канал получения:</label>
+                <select id="cmp-channel" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="Письменное обращение">Письменное обращение</option>
+                    <option value="Электронная почта">Электронная почта</option>
+                    <option value="Через ЦБ/СРО">Через ЦБ/СРО</option>
+                    <option value="Устно (зафиксировано)">Устно (зафиксировано)</option>
+                    <option value="Прочее">Прочее</option>
+                </select>
+            </div>
+            <div class="flex flex-col md:col-span-2">
+                <label class="text-sm mb-1 font-bold">Суть обращения:</label>
+                <input type="text" id="cmp-description" class="p-2 border border-[#A69C97] rounded" placeholder="Краткое описание жалобы/обращения...">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Регуляторный риск выявлен?</label>
+                <select id="cmp-risk" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="Нет">Нет</option>
+                    <option value="Да">Да — внесено в реестр событий</option>
+                    <option value="На оценке">На оценке</option>
+                </select>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Ответственный:</label>
+                <input type="text" id="cmp-responsible" class="p-2 border border-[#A69C97] rounded" placeholder="Иванов И.И.">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Статус рассмотрения:</label>
+                <select id="cmp-status" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="В рассмотрении">В рассмотрении</option>
+                    <option value="Рассмотрено">Рассмотрено</option>
+                    <option value="Направлено в ЦБ/СРО">Направлено в ЦБ/СРО</option>
+                </select>
+            </div>
+            <div class="flex flex-col md:col-span-3">
+                <label class="text-sm mb-1">Результат рассмотрения:</label>
+                <input type="text" id="cmp-result" class="p-2 border border-[#A69C97] rounded" placeholder="Отказ / Удовлетворена / Переадресована...">
+            </div>
+        </div>
+        <button onclick="saveComplaint()" class="mt-6 bg-[#4B4240] text-white py-2 px-6 rounded-lg hover:bg-[#7D7471] transition">Зарегистрировать обращение</button>
+    </div>
+    <div class="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Журнал обращений</h2>
+            <div class="text-sm text-[#7D7471]">
+                Всего: <span id="cmp-count-total" class="font-bold text-[#4B4240]">0</span> |
+                В рассмотрении: <span id="cmp-count-active" class="font-bold text-orange-500">0</span> |
+                Просрочено: <span id="cmp-count-overdue" class="font-bold text-red-600">0</span>
+            </div>
+        </div>
+        <table class="w-full min-w-max text-left border-collapse">
+            <thead class="bg-gray-50 border-b-2 border-gray-200">
+                <tr>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Дата получения</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Дедлайн</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Суть</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Канал</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Риск выявлен?</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Ответственный</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Статус</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Результат</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Действие</th>
+                </tr>
+            </thead>
+            <tbody id="complaints-table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+        <div id="section-conflicts" class="content-section">
+    <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Реестр конфликтов интересов</h1>
+    <p class="text-lg text-[#7D7471] mb-6">Выявление, документирование и урегулирование конфликтов интересов (ст. 10 Федерального закона № 39-ФЗ, п. 1.8 Указания № 5683-У).</p>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-[#4B4240]">
+            <p class="text-2xl font-bold text-[#4B4240]" id="coi-stat-total">0</p>
+            <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Всего конфликтов</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-red-500">
+            <p class="text-2xl font-bold text-red-600" id="coi-stat-open">0</p>
+            <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Не урегулированы</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-green-500">
+            <p class="text-2xl font-bold text-green-600" id="coi-stat-resolved">0</p>
+            <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Урегулировано</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-[#D9A86E]">
+            <p class="text-2xl font-bold text-[#D9A86E]" id="coi-stat-high">0</p>
+            <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Высокий риск</p>
+        </div>
+    </div>
+    <div class="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-[#D9A86E]">
+        <h2 class="text-xl font-semibold mb-1" id="coi-form-title">Зарегистрировать конфликт</h2>
+        <p class="text-xs text-[#A69C97] mb-4">Документирование обязательно при выявлении конфликта.</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Дата выявления:</label>
+                <input type="date" id="coi-date" class="p-2 border border-[#A69C97] rounded">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Вид конфликта:</label>
+                <select id="coi-type" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="Брокер vs Дилер">Брокер vs Дилер (собственная позиция)</option>
+                    <option value="УК — разные клиенты">УК — разные клиенты (распределение сделок)</option>
+                    <option value="Личный интерес сотрудника">Личный интерес сотрудника</option>
+                    <option value="Компания vs Клиент">Интерес компании vs Интерес клиента</option>
+                    <option value="Аффилированность">Аффилированность / связанные лица</option>
+                    <option value="Вознаграждение от третьих лиц">Вознаграждение от третьих лиц</option>
+                    <option value="Иное">Иное</option>
+                </select>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1 font-bold">Уровень риска:</label>
+                <select id="coi-risk" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="Низкий">Низкий</option>
+                    <option value="Средний">Средний</option>
+                    <option value="Высокий">Высокий</option>
+                </select>
+            </div>
+            <div class="flex flex-col md:col-span-3">
+                <label class="text-sm mb-1 font-bold">Описание конфликта:</label>
+                <textarea id="coi-description" rows="2" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="Подробно опишите суть конфликта: кто вовлечён, в чём расхождение интересов..."></textarea>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Стороны конфликта:</label>
+                <input type="text" id="coi-parties" class="p-2 border border-[#A69C97] rounded" placeholder="Подразделение / сотрудник / клиент">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Ответственный контролёр:</label>
+                <input type="text" id="coi-responsible" class="p-2 border border-[#A69C97] rounded" placeholder="Иванов И.И.">
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Статус урегулирования:</label>
+                <select id="coi-status" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="Выявлен">Выявлен</option>
+                    <option value="В урегулировании">В урегулировании</option>
+                    <option value="Урегулирован">Урегулирован</option>
+                    <option value="Раскрыт клиенту">Раскрыт клиенту</option>
+                </select>
+            </div>
+            <div class="flex flex-col md:col-span-2">
+                <label class="text-sm mb-1">Способ урегулирования:</label>
+                <select id="coi-resolution-type" class="p-2 border border-[#A69C97] rounded bg-white">
+                    <option value="">— Выберите способ —</option>
+                    <option value="Раскрытие информации клиенту">Раскрытие информации клиенту</option>
+                    <option value="Отказ от операции">Отказ от операции</option>
+                    <option value="Передача решения другому лицу">Передача решения другому лицу</option>
+                    <option value="Установление барьера информации">Chinese wall (барьер информации)</option>
+                    <option value="Изменение порядка исполнения">Изменение порядка исполнения</option>
+                    <option value="Иное">Иное</option>
+                </select>
+            </div>
+            <div class="flex flex-col">
+                <label class="text-sm mb-1">Дата урегулирования:</label>
+                <input type="date" id="coi-resolved-date" class="p-2 border border-[#A69C97] rounded">
+            </div>
+            <div class="flex flex-col md:col-span-3">
+                <label class="text-sm mb-1">Принятые меры / результат урегулирования:</label>
+                <input type="text" id="coi-result" class="p-2 border border-[#A69C97] rounded" placeholder="Опишите что конкретно сделано...">
+            </div>
+        </div>
+        <input type="hidden" id="coi-editing-id">
+        <div class="flex gap-3 mt-5">
+            <button onclick="saveConflict()" class="bg-[#4B4240] text-white py-2 px-6 rounded-lg hover:bg-[#7D7471] transition font-semibold">Зарегистрировать</button>
+            <button onclick="resetConflictForm()" id="coi-cancel-btn" class="hidden bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition">Отмена</button>
+        </div>
+    </div>
+    <div class="bg-white p-4 rounded-xl shadow-sm mb-4 flex flex-wrap gap-3 items-end">
+        <div class="flex flex-col">
+            <label class="text-xs text-[#7D7471] mb-1">Вид конфликта</label>
+            <select id="coi-filter-type" onchange="renderConflicts()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                <option value="">Все виды</option>
+                <option value="Брокер vs Дилер">Брокер vs Дилер</option>
+                <option value="УК — разные клиенты">УК — разные клиенты</option>
+                <option value="Личный интерес сотрудника">Личный интерес сотрудника</option>
+                <option value="Компания vs Клиент">Компания vs Клиент</option>
+                <option value="Аффилированность">Аффилированность</option>
+                <option value="Вознаграждение от третьих лиц">Вознаграждение от третьих лиц</option>
+                <option value="Иное">Иное</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label class="text-xs text-[#7D7471] mb-1">Статус</label>
+            <select id="coi-filter-status" onchange="renderConflicts()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                <option value="">Все статусы</option>
+                <option value="Выявлен">Выявлен</option>
+                <option value="В урегулировании">В урегулировании</option>
+                <option value="Урегулирован">Урегулирован</option>
+                <option value="Раскрыт клиенту">Раскрыт клиенту</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label class="text-xs text-[#7D7471] mb-1">Риск</label>
+            <select id="coi-filter-risk" onchange="renderConflicts()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                <option value="">Все уровни</option>
+                <option value="Высокий">Высокий</option>
+                <option value="Средний">Средний</option>
+                <option value="Низкий">Низкий</option>
+            </select>
+        </div>
+        <div class="flex flex-col">
+            <label class="text-xs text-[#7D7471] mb-1">Период с</label>
+            <input type="date" id="coi-filter-from" onchange="renderConflicts()" class="p-2 border border-[#A69C97] rounded text-sm">
+        </div>
+        <div class="flex flex-col">
+            <label class="text-xs text-[#7D7471] mb-1">по</label>
+            <input type="date" id="coi-filter-to" onchange="renderConflicts()" class="p-2 border border-[#A69C97] rounded text-sm">
+        </div>
+        <button onclick="clearConflictFilters()" class="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200 transition">Сбросить</button>
+    </div>
+    <div class="bg-white p-6 rounded-xl shadow-md overflow-x-auto">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Реестр конфликтов</h2>
+            <span class="text-sm text-[#7D7471]" id="coi-count-label"></span>
+        </div>
+        <table class="w-full min-w-max text-left border-collapse">
+            <thead class="bg-gray-50 border-b-2 border-gray-200">
+                <tr>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Дата</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Вид конфликта</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Описание</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Стороны</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Риск</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Статус</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Способ урегулирования</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Ответственный</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Дата урег.</th>
+                    <th class="p-3 text-xs font-bold text-[#7D7471]">Действия</th>
+                </tr>
+            </thead>
+            <tbody id="conflicts-table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+        <div id="section-reports" class="content-section">
+            <div class="flex items-center justify-center min-h-[400px] flex-col gap-4 text-center">
+                <div class="text-6xl">🚧</div>
+                <h2 class="text-2xl font-bold text-[#4B4240]">Квартальный отчет</h2>
+                <p class="text-[#7D7471] text-lg">Раздел находится на доработке</p>
+                <p class="text-[#A69C97] text-sm">Функционал будет доступен в следующей версии</p>
+            </div>
+        </div>
+                <div id="section-knowledge" class="content-section">
+            <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">База Знаний и Нормативные Акты</h1>
+            <p class="text-lg text-[#7D7471] mb-6">Справочные материалы, матрицы рисков и регламенты.</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 flex items-center">
+                        <span class="mr-2 text-[#D9A86E]">&#128218;</span> Ключевые знания
+                    </h2>
+                    
+                    <div class="space-y-2">
+                        <div class="border border-[#A69C97] rounded-lg overflow-hidden">
+                            <button onclick="toggleAccordion('acc-ratings')" class="w-full flex justify-between items-center p-3 bg-[#FDFBF8] hover:bg-[#EFEFEF] transition duration-200 text-left font-semibold text-[#4B4240]">
+                                <span>1. Рейтинговые оценки уровня риска</span>
+                                <span id="icon-acc-ratings" class="text-[#D9A86E] transform transition-transform duration-200">&#9660;</span>
+                            </button>
+                            <div id="acc-ratings" class="hidden bg-white p-4 border-t border-[#A69C97] overflow-x-auto">
+                                <p class="text-xs text-[#7D7471] mb-3 italic">Матрица оценки уровня регуляторного риска на основе 5 факторов.</p>
+                                <table class="w-full text-xs text-left border-collapse min-w-[600px]">
+                                    <thead>
+                                        <tr class="bg-[#4B4240] text-white">
+                                            <th class="p-2 border">Рейтинг</th>
+                                            <th class="p-2 border">Репутационный фактор</th>
+                                            <th class="p-2 border">Регуляторный фактор</th>
+                                            <th class="p-2 border">Финансовый фактор</th>
+                                            <th class="p-2 border">Рынок / Клиенты</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr class="border-b hover:bg-red-50">
+                                            <td class="p-2 border font-bold text-center bg-red-100 text-red-800">5</td>
+                                            <td class="p-2 border">Негативное освещение в международных/федеральных СМИ. Критические репутационные вопросы.</td>
+                                            <td class="p-2 border">Отзыв/приостановление лицензии. Ограничение деятельности. Интенсивные проверки.</td>
+                                            <td class="p-2 border">Потери 0.8% - 1% от оп. доходов.</td>
+                                            <td class="p-2 border">Роль в кризисе фин. системы. Банкротство клиентов (&gt;90% потерь вложений).</td>
+                                        </tr>
+                                        <tr class="border-b hover:bg-orange-50">
+                                            <td class="p-2 border font-bold text-center bg-orange-100 text-orange-800">4</td>
+                                            <td class="p-2 border">Негативное освещение в местных/региональных СМИ. Значимые судебные споры.</td>
+                                            <td class="p-2 border">Вероятность штрафов/санкций в ближ. 3 мес. Восходящий тренд проверок.</td>
+                                            <td class="p-2 border">Потери 0.4% - 0.8% от оп. доходов.</td>
+                                            <td class="p-2 border">Провоцирование утраты доверия инвесторов. Убыток клиентов &gt;70%.</td>
+                                        </tr>
+                                        <tr class="border-b hover:bg-yellow-50">
+                                            <td class="p-2 border font-bold text-center bg-yellow-100 text-yellow-800">3</td>
+                                            <td class="p-2 border">Умеренно-негативная реакция рынка. Увеличение жалоб.</td>
+                                            <td class="p-2 border">Предупреждения регулятора. Стабильное кол-во проверок.</td>
+                                            <td class="p-2 border">Потери 0.2% - 0.4% от оп. доходов.</td>
+                                            <td class="p-2 border">Маловероятная роль в кризисе. Убыток клиентов &gt;50%.</td>
+                                        </tr>
+                                        <tr class="border-b hover:bg-green-50">
+                                            <td class="p-2 border font-bold text-center bg-green-100 text-green-800">2</td>
+                                            <td class="p-2 border">Нисходящий тренд жалоб. Незначительная реакция внутренних участников.</td>
+                                            <td class="p-2 border">Низкое внимание регулятора. Нисходящий тренд проверок.</td>
+                                            <td class="p-2 border">Потери 0.1% - 0.2% от оп. доходов.</td>
+                                            <td class="p-2 border">Минимальное воздействие на рынок. Убыток клиентов &lt;30%.</td>
+                                        </tr>
+                                        <tr class="border-b hover:bg-gray-50">
+                                            <td class="p-2 border font-bold text-center bg-gray-100 text-gray-800">1</td>
+                                            <td class="p-2 border">Отсутствие жалоб и споров. Отсутствие негативного освещения.</td>
+                                            <td class="p-2 border">Отсутствие проверок и нарушений законодательства.</td>
+                                            <td class="p-2 border">Потери &lt;0.1% от оп. доходов.</td>
+                                            <td class="p-2 border">Отсутствие ущерба конкуренции и убытков клиентов.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 flex items-center">
+                        <span class="mr-2 text-[#4B4240]">&#128279;</span> Внешние Ресурсы (Ссылки)
+                    </h2>
+                    
+                    <div class="mb-4 p-3 border border-[#A69C97] rounded-lg bg-[#FDFBF8]">
+                        <input type="text" id="link-title" placeholder="Название ссылки (напр., ЦБ РФ)" class="w-full p-2 mb-2 border border-gray-300 rounded text-sm">
+                        <input type="url" id="link-url" placeholder="URL (напр., https://www.cbr.ru)" class="w-full p-2 mb-3 border border-gray-300 rounded text-sm">
+                        <button onclick="addExternalLink()" class="w-full bg-[#D9A86E] text-white py-2 rounded-lg hover:bg-[#A69C97] transition duration-200 text-sm font-semibold">
+                            Добавить ссылку
+                        </button>
+                    </div>
+
+                    <ul id="external-links-list" class="list-disc ml-5 space-y-2 text-[#4B4240]"></ul>
+                </div>
+
+                <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-md border-t border-[#A69C97]">
+                    <h3 class="font-semibold text-[#4B4240] mb-2">Методологическая Заметка:</h3>
+                    <p class="text-sm text-[#7D7471]">
+                        Для определения существенности риска (ПВК п. 6) необходимо иметь актуальный расчет собственного капитала.
+                        События, связанные с Таксономией 6.1 (Профилирование), требуют обязательного внесения мер по предотвращению повтора.
+                    </p>
+                </div>
+
+                <!-- Информационная справка (индексируется поиском) -->
+                <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-md" id="knowledge-info-block">
+                    <h3 class="font-semibold text-[#4B4240] mb-4 text-lg flex items-center gap-2">
+                        <span>📖</span> Справочник терминов
+                    </h3>
+
+                    <!-- Форма добавления / редактирования -->
+                    <div class="mb-6 p-4 bg-[#F5F0EB] rounded-lg border border-[#E0D9D4]">
+                        <p id="ki-form-title" class="text-sm font-semibold text-[#4B4240] mb-3">Добавить термин</p>
+                        <div class="space-y-2">
+                            <input type="text" id="ki-title" placeholder="Название термина (напр., НДК)"
+                                class="w-full p-2 border border-[#A69C97] rounded text-sm bg-white">
+                            <textarea id="ki-body" rows="3" placeholder="Описание / определение термина..."
+                                class="w-full p-2 border border-[#A69C97] rounded text-sm bg-white resize-y"></textarea>
+                            <div class="flex gap-2">
+                                <button id="ki-save-btn" onclick="saveKnowledgeItem()"
+                                    class="bg-[#D9A86E] text-white py-2 px-4 rounded-lg hover:bg-[#A69C97] transition text-sm font-semibold">
+                                    + Добавить термин
+                                </button>
+                                <button id="ki-cancel-btn" onclick="cancelKnowledgeEdit()"
+                                    class="hidden bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition text-sm">
+                                    Отмена
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Список терминов (рендерится из db.knowledgeItems) -->
+                    <div id="knowledge-info-list" class="space-y-3">
+                        <p class="text-sm text-[#A69C97] italic">Загрузка...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- ПАНЕЛЬ РАСЧЁТА ПРОГНОЗА (скрытая, открывается кликом на Прогноз) -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <div id="section-forecast-detail" class="content-section">
+            <!-- Навигация назад -->
+            <div class="flex items-center gap-3 mb-6">
+                <button onclick="closeForecastDetail()"
+                    class="flex items-center gap-2 text-sm text-[#7D7471] hover:text-[#4B4240] transition px-3 py-2 rounded-lg border border-[#A69C97] hover:border-[#4B4240]">
+                    ← Назад к показателям
+                </button>
+                <h1 class="text-2xl font-bold text-[#4B4240]" id="fcd-title">Расчёт прогноза</h1>
+            </div>
+
+            <!-- Карточки-резюме -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="fcd-cards"></div>
+
+            <!-- Основной контент -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+                <!-- Левая колонка: методология -->
+                <div class="bg-white rounded-xl shadow-md p-6">
+                    <h2 class="text-lg font-bold text-[#4B4240] mb-4 flex items-center gap-2">
+                        <span class="text-[#D9A86E]">📐</span> Метод расчёта
+                    </h2>
+                    <div id="fcd-method" class="space-y-4 text-sm text-[#4B4240]"></div>
+                </div>
+
+                <!-- Правая колонка: пошаговые вычисления -->
+                <div class="bg-white rounded-xl shadow-md p-6">
+                    <h2 class="text-lg font-bold text-[#4B4240] mb-4 flex items-center gap-2">
+                        <span class="text-[#D9A86E]">🔢</span> Пошаговый расчёт
+                    </h2>
+                    <div id="fcd-steps" class="space-y-3 text-sm"></div>
+                </div>
+            </div>
+
+            <!-- Таблица итераций Холта -->
+            <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <h2 class="text-lg font-bold text-[#4B4240] mb-4 flex items-center gap-2">
+                    <span class="text-[#D9A86E]">📊</span> Итерации метода Холта
+                    <span class="text-xs font-normal text-[#A69C97] ml-2">— как менялся уровень и наклон по каждой точке</span>
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm border-collapse" id="fcd-table">
+                        <thead>
+                            <tr class="bg-[#4B4240] text-white">
+                                <th class="p-3 text-left rounded-tl-lg">Дата</th>
+                                <th class="p-3 text-right">Факт. значение</th>
+                                <th class="p-3 text-right">Вкл. в тренд?</th>
+                                <th class="p-3 text-right">Уровень L</th>
+                                <th class="p-3 text-right">Наклон S</th>
+                                <th class="p-3 text-right">Отклонение</th>
+                                <th class="p-3 text-right rounded-tr-lg">Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fcd-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Прогнозные точки -->
+            <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <h2 class="text-lg font-bold text-[#4B4240] mb-4 flex items-center gap-2">
+                    <span class="text-[#D9A86E]">🔮</span> Прогнозные точки
+                    <span class="text-xs font-normal text-[#A69C97] ml-2">— F(h) = L + h × S</span>
+                </h2>
+                <div id="fcd-forecast-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+            </div>
+
+            <!-- Интерпретация и выводы -->
+            <div class="bg-white rounded-xl shadow-md p-6">
+                <h2 class="text-lg font-bold text-[#4B4240] mb-4 flex items-center gap-2">
+                    <span class="text-[#D9A86E]">💡</span> Интерпретация
+                </h2>
+                <div id="fcd-interpretation" class="text-sm text-[#4B4240] space-y-3"></div>
+            </div>
+        </div>
+
+        <div id="section-cbr-rss" class="content-section">
+            <!-- Контент генерируется динамически модулем 18-cbr-rss.js -->
+            <div class="text-center py-16 text-[#A69C97] italic">Загрузка модуля мониторинга RSS...</div>
+        </div>
+
+        <div id="section-auditlog" class="content-section">
+            <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Логи изменений</h1>
+            <p class="text-lg text-[#7D7471] mb-6">Полная история всех действий с данными — что и когда изменилось. Доказательная база при проверке Банком России.</p>
+
+            <!-- Статистика -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-[#4B4240]">
+                    <p class="text-2xl font-bold text-[#4B4240]" id="audit-stat-total">0</p>
+                    <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Всего записей</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-blue-400">
+                    <p class="text-2xl font-bold text-blue-600" id="audit-stat-today">0</p>
+                    <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Сегодня</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-green-500">
+                    <p class="text-2xl font-bold text-green-600" id="audit-stat-creates">0</p>
+                    <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Создано</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 text-center border-l-4 border-orange-400">
+                    <p class="text-2xl font-bold text-orange-500" id="audit-stat-edits">0</p>
+                    <p class="text-xs text-[#7D7471] uppercase tracking-wide mt-1">Изменено / Удалено</p>
+                </div>
+            </div>
+
+            <!-- Фильтры и управление -->
+            <div class="bg-white p-5 rounded-xl shadow-md mb-6">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-[#7D7471] mb-1 uppercase">Раздел</label>
+                        <select id="audit-filter-section" onchange="renderAuditLog()" class="p-2 border border-[#A69C97] rounded bg-white text-sm min-w-[160px]">
+                            <option value="">Все разделы</option>
+                            <option value="Реестр событий">Реестр событий</option>
+                            <option value="Предписания">Предписания</option>
+                            <option value="Проверки">Проверки</option>
+                            <option value="Жалобы">Жалобы</option>
+                            <option value="Фин. показатели">Фин. показатели</option>
+                            <option value="План проверок">План проверок</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-[#7D7471] mb-1 uppercase">Действие</label>
+                        <select id="audit-filter-action" onchange="renderAuditLog()" class="p-2 border border-[#A69C97] rounded bg-white text-sm min-w-[140px]">
+                            <option value="">Все действия</option>
+                            <option value="Создано">Создано</option>
+                            <option value="Изменено">Изменено</option>
+                            <option value="Удалено">Удалено</option>
+                            <option value="Статус изменён">Статус изменён</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-[#7D7471] mb-1 uppercase">С даты</label>
+                        <input type="date" id="audit-filter-from" onchange="renderAuditLog()" class="p-2 border border-[#A69C97] rounded text-sm">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-[#7D7471] mb-1 uppercase">По дату</label>
+                        <input type="date" id="audit-filter-to" onchange="renderAuditLog()" class="p-2 border border-[#A69C97] rounded text-sm">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-[#7D7471] mb-1 uppercase">Поиск</label>
+                        <input type="text" id="audit-filter-search" oninput="renderAuditLog()" placeholder="Описание события, ID..." class="p-2 border border-[#A69C97] rounded text-sm min-w-[200px]">
+                    </div>
+                    <div class="flex gap-2 ml-auto">
+                        <button onclick="clearAuditFilters()" class="px-3 py-2 border border-[#A69C97] text-[#7D7471] rounded text-sm hover:bg-gray-50 transition">Сбросить</button>
+                        <button onclick="exportAuditToExcel()" class="px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition font-semibold">📥 Excel</button>
+                        <button onclick="if(confirm('Очистить весь журнал изменений? Это действие нельзя отменить.')) { db.auditLog=[]; saveDb(); renderAuditLog(); }" class="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded text-sm hover:bg-red-100 transition">🗑 Очистить</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Таблица -->
+            <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                <div class="flex justify-between items-center px-6 py-4 border-b border-gray-100">
+                    <h2 class="text-lg font-semibold">История изменений</h2>
+                    <span class="text-sm text-[#7D7471]">Показано: <span id="audit-shown-count" class="font-bold text-[#4B4240]">0</span> из <span id="audit-total-count" class="font-bold">0</span></span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-50 border-b-2 border-gray-200">
+                                <th class="p-3 text-xs font-bold text-[#7D7471] whitespace-nowrap">Дата и время</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Раздел</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Действие</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Объект</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Детали изменения</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471] whitespace-nowrap">Было → Стало</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-table-body">
+                            <tr><td colspan="6" class="p-8 text-center text-[#A69C97] italic">Журнал пуст — изменения появятся здесь автоматически</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Пагинация -->
+                <div class="flex justify-between items-center px-6 py-3 border-t border-gray-100 bg-gray-50">
+                    <button id="audit-prev-btn" onclick="auditPage--; renderAuditLog()" class="px-3 py-1 border border-[#A69C97] rounded text-sm disabled:opacity-40 hover:bg-gray-100 transition">← Пред.</button>
+                    <span id="audit-page-info" class="text-sm text-[#7D7471]">стр. 1</span>
+                    <button id="audit-next-btn" onclick="auditPage++; renderAuditLog()" class="px-3 py-1 border border-[#A69C97] rounded text-sm disabled:opacity-40 hover:bg-gray-100 transition">След. →</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== РАЗДЕЛ: ФИНАНСОВЫЕ ПОКАЗАТЕЛИ ===== -->
+        <div id="section-financials" class="content-section">
+            <h1 class="text-3xl font-bold mb-2 text-[#4B4240]">Финансовые показатели</h1>
+            <p class="text-lg text-[#7D7471] mb-6">Мониторинг НДК, НКЛ и Собственных средств. Контроль соответствия минимальным требованиям Банка России (<a href="https://internet.garant.ru/#/document/71695022/paragraph/1:0" target="_blank" class="text-[#D9A86E] underline hover:text-[#A69C97] transition">Указание № 4373-У</a>, <a href="https://internet.garant.ru/#/document/74225145/paragraph/1:0" target="_blank" class="text-[#D9A86E] underline hover:text-[#A69C97] transition">№ 5436-У</a>, <a href="https://internet.garant.ru/#/document/402787636/paragraph/1:5" target="_blank" class="text-[#D9A86E] underline hover:text-[#A69C97] transition">№ 5873-У</a>).</p>
+
+            <!-- Блок предупреждений EWMA -->
+            <div id="fin-warnings" class="flex flex-col gap-2 mb-6">
+                <div class="text-sm text-[#A69C97] italic">Анализ трендов загружается...</div>
+            </div>
+
+            <!-- Карточки текущего состояния -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+                <!-- НДК -->
+                <div class="bg-white p-6 rounded-xl shadow-md border-l-4" id="card-nkd" style="border-left-color:#D9A86E">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-xs font-bold uppercase tracking-wide text-[#7D7471]">НДК — Норматив кратк. ликвидности (достаточность)</h3>
+                        <span id="badge-nkd" class="text-xs font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-600">—</span>
+                    </div>
+                    <p class="text-4xl font-bold text-[#4B4240] mb-1" id="nkd-current-display">—</p>
+                    <p class="text-sm text-[#A69C97]">Минимум: <span class="font-semibold text-[#4B4240]" id="nkd-min-display">—</span></p>
+                    <p class="text-xs text-[#A69C97] mt-2">Последнее обновление: <span id="nkd-last-date">—</span></p>
+                </div>
+                <!-- НКЛ -->
+                <div class="bg-white p-6 rounded-xl shadow-md border-l-4" id="card-nkl" style="border-left-color:#D9A86E">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-xs font-bold uppercase tracking-wide text-[#7D7471]">НКЛ — Норматив кратк. ликвидности</h3>
+                        <span id="badge-nkl" class="text-xs font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-600">—</span>
+                    </div>
+                    <p class="text-4xl font-bold text-[#4B4240] mb-1" id="nkl-current-display">—</p>
+                    <p class="text-sm text-[#A69C97]">Минимум: <span class="font-semibold text-[#4B4240]" id="nkl-min-display">—</span></p>
+                    <p class="text-xs text-[#A69C97] mt-2">Последнее обновление: <span id="nkl-last-date">—</span></p>
+                </div>
+                <!-- Собственные средства -->
+                <div class="bg-white p-6 rounded-xl shadow-md border-l-4" id="card-equity" style="border-left-color:#D9A86E">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-xs font-bold uppercase tracking-wide text-[#7D7471]">Собственные средства</h3>
+                        <span id="badge-equity" class="text-xs font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-600">—</span>
+                    </div>
+                    <p class="text-4xl font-bold text-[#4B4240] mb-1" id="equity-current-display">—</p>
+                    <p class="text-sm text-[#A69C97]">Минимум: <span class="font-semibold text-[#4B4240]" id="equity-min-display">—</span></p>
+                    <p class="text-xs text-[#A69C97] mt-2">Последнее обновление: <span id="equity-last-date">—</span></p>
+                </div>
+            </div>
+
+            <!-- Графики динамики -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <div class="flex justify-between items-start mb-1">
+                        <h2 class="text-xl font-semibold">Динамика НДК</h2>
+                        <div class="flex gap-1 text-xs items-center">
+                            <button id="nkd-scale-linear" onclick="setNkdScale('linear')"
+                                class="px-2 py-1 rounded border font-semibold transition"
+                                style="background:var(--bg-nav);color:white;border-color:var(--accent)">Лин.</button>
+                            <button id="nkd-scale-log" onclick="setNkdScale('log')"
+                                class="px-2 py-1 rounded border font-semibold transition"
+                                style="background:transparent;color:var(--text-secondary);border-color:var(--border)">Лог.</button>
+                            <button onclick="exportChartPNG('financialsNkdChart','НДК')" title="Скачать график PNG"
+                                class="px-1.5 py-1 rounded border transition"
+                                style="background:transparent;color:var(--text-secondary);border-color:var(--border);font-size:13px;line-height:1">📷</button>
+                        </div>
+                    </div>
+                    <p class="text-sm text-[#7D7471] mb-4">Норматив краткосрочной ликвидности (достаточность), %</p>
+                    <div class="chart-container w-full h-[260px]">
+                        <canvas id="financialsNkdChart"></canvas>
+                    </div>
+                    <button onclick="openForecastDetail('nkd')"
+                        class="mt-3 w-full text-xs py-1.5 px-3 rounded-lg border border-[#D9A86E] text-[#D9A86E] hover:bg-[#D9A86E] hover:text-white transition font-semibold">
+                        🔮 Подробный расчёт прогноза НДК →
+                    </button>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <div class="flex justify-between items-start mb-1">
+                        <h2 class="text-xl font-semibold">Динамика НКЛ</h2>
+                        <div class="flex gap-1 text-xs items-center">
+                            <button id="nkl-scale-linear" onclick="setNklScale('linear')"
+                                class="px-2 py-1 rounded border font-semibold transition"
+                                style="background:var(--bg-nav);color:white;border-color:var(--accent)">Лин.</button>
+                            <button id="nkl-scale-log" onclick="setNklScale('log')"
+                                class="px-2 py-1 rounded border font-semibold transition"
+                                style="background:transparent;color:var(--text-secondary);border-color:var(--border)">Лог.</button>
+                            <button onclick="exportChartPNG('financialsNklChart','НКЛ')" title="Скачать график PNG"
+                                class="px-1.5 py-1 rounded border transition"
+                                style="background:transparent;color:var(--text-secondary);border-color:var(--border);font-size:13px;line-height:1">📷</button>
+                        </div>
+                    </div>
+                    <p class="text-sm text-[#7D7471] mb-4">Норматив краткосрочной ликвидности, %</p>
+                    <div class="chart-container w-full h-[260px]">
+                        <canvas id="financialsNklChart"></canvas>
+                    </div>
+                    <button onclick="openForecastDetail('nkl')"
+                        class="mt-3 w-full text-xs py-1.5 px-3 rounded-lg border border-[#5B9BD5] text-[#5B9BD5] hover:bg-[#5B9BD5] hover:text-white transition font-semibold">
+                        🔮 Подробный расчёт прогноза НКЛ →
+                    </button>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <div class="flex justify-between items-start mb-1">
+                        <h2 class="text-xl font-semibold">Динамика Собственных средств</h2>
+                        <div class="flex gap-1 text-xs items-center">
+                            <button id="eq-type-bar" onclick="setEquityChartType('bar')"
+                                class="px-3 py-1 rounded border text-xs font-semibold transition"
+                                style="background:#4B4240;color:white;border-color:#4B4240;">
+                                Бар.
+                            </button>
+                            <button id="eq-type-line" onclick="setEquityChartType('line')"
+                                class="px-3 py-1 rounded border text-xs font-semibold transition"
+                                style="background:transparent;color:#7D7471;border-color:#A69C97;">
+                                Лин.
+                            </button>
+                            <button onclick="exportChartPNG('financialsEquityChart','Собственные_средства')" title="Скачать график PNG"
+                                class="px-1.5 py-1 rounded border transition"
+                                style="background:transparent;color:#7D7471;border-color:#A69C97;font-size:13px;line-height:1">📷</button>
+                        </div>
+                    </div>
+                    <p class="text-sm text-[#7D7471] mb-4">Фактический размер vs минимальный норматив (тыс. руб.)</p>
+                    <div class="chart-container w-full h-[260px]">
+                        <canvas id="financialsEquityChart"></canvas>
+                    </div>
+                    <button onclick="openForecastDetail('equity')"
+                        class="mt-3 w-full text-xs py-1.5 px-3 rounded-lg border border-[#4B4240] text-[#4B4240] hover:bg-[#4B4240] hover:text-white transition font-semibold">
+                        🔮 Подробный расчёт прогноза Собств. средств →
+                    </button>
+                </div>
+            </div>
+
+            <!-- Форма ввода нового значения + настройки -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <!-- Форма добавления записи -->
+                <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">Добавить запись показателей</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="flex flex-col">
+                            <label class="text-sm mb-1 font-bold text-[#4B4240]">Дата:</label>
+                            <input type="date" id="fin-date" class="p-2 border border-[#A69C97] rounded">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm mb-1">Вид показателя:</label>
+                            <select id="fin-type" class="p-2 border border-[#A69C97] rounded bg-white" onchange="updateFinUnit()">
+                                <option value="nkd">НДК (%)</option>
+                                <option value="nkl">НКЛ (%)</option>
+                                <option value="equity">Собственные средства (тыс. руб.)</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm mb-1 font-bold text-[#4B4240]">Фактическое значение (<span id="fin-unit-label">%</span>):</label>
+                            <input type="number" id="fin-value" step="0.01" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., 125.5">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm mb-1">Комментарий (необязательно):</label>
+                            <input type="text" id="fin-comment" class="p-2 border border-[#A69C97] rounded" placeholder="Напр., Квартальный расчет">
+                        </div>
+                    </div>
+                    <button onclick="saveFinRecord()" class="mt-5 bg-[#D9A86E] text-white py-2 px-6 rounded-lg hover:bg-[#A69C97] transition duration-200 font-semibold">
+                        ✚ Добавить запись
+                    </button>
+                </div>
+
+                <!-- Настройки минимальных значений и зон -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <h2 class="text-xl font-semibold mb-1">⚙ Нормативные минимумы и зоны</h2>
+                    <p class="text-xs text-[#A69C97] mb-4">Минимумы — требования регулятора. Зоны — ранние сигналы: жёлтая — внимание, красная — срочно.</p>
+
+                    <div class="space-y-5">
+                        <!-- НДК -->
+                        <div class="p-3 rounded-lg border border-[#E0E0E0] bg-[#FDFBF8]">
+                            <p class="text-sm font-bold text-[#4B4240] mb-2">НДК (норматив достаточности)</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-[#7D7471]">Минимум (%):</label>
+                                    <input type="number" id="fin-min-nkd" step="0.01" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="8">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-yellow-600">🟡 Жёлтая зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-nkd-yellow" step="1" value="150"
+                                        class="p-2 border border-yellow-300 rounded text-sm bg-yellow-50">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-red-500">🔴 Красная зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-nkd-red" step="1" value="120"
+                                        class="p-2 border border-red-200 rounded text-sm bg-red-50">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- НКЛ -->
+                        <div class="p-3 rounded-lg border border-[#E0E0E0] bg-[#FDFBF8]">
+                            <p class="text-sm font-bold text-[#4B4240] mb-2">НКЛ (норматив ликвидности)</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-[#7D7471]">Минимум (%):</label>
+                                    <input type="number" id="fin-min-nkl" step="0.01" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="100">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-yellow-600">🟡 Жёлтая зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-nkl-yellow" step="1" value="200"
+                                        class="p-2 border border-yellow-300 rounded text-sm bg-yellow-50">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-red-500">🔴 Красная зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-nkl-red" step="1" value="150"
+                                        class="p-2 border border-red-200 rounded text-sm bg-red-50">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Собственные средства -->
+                        <div class="p-3 rounded-lg border border-[#E0E0E0] bg-[#FDFBF8]">
+                            <p class="text-sm font-bold text-[#4B4240] mb-2">Собственные средства</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-[#7D7471]">Минимум (тыс. руб.):</label>
+                                    <input type="number" id="fin-min-equity" step="1" class="p-2 border border-[#A69C97] rounded text-sm" placeholder="15000000">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-yellow-600">🟡 Жёлтая зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-equity-yellow" step="1" value="130"
+                                        class="p-2 border border-yellow-300 rounded text-sm bg-yellow-50">
+                                </div>
+                                <div class="flex flex-col">
+                                    <label class="text-xs mb-1 text-red-500">🔴 Красная зона (% от мин.):</label>
+                                    <input type="number" id="fin-zone-equity-red" step="1" value="115"
+                                        class="p-2 border border-red-200 rounded text-sm bg-red-50">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Устаревшие скрытые поля для обратной совместимости -->
+                        <input type="hidden" id="fin-zone-yellow" value="120">
+                        <input type="hidden" id="fin-zone-red" value="110">
+
+                        <button onclick="saveFinMins()" class="w-full mt-2 bg-[#4B4240] text-white py-2 px-4 rounded-lg hover:bg-[#2c2625] transition duration-200 text-sm font-semibold">
+                            Сохранить настройки
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- История записей -->
+            <div class="bg-white p-6 rounded-xl shadow-md">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
+                    <h2 class="text-xl font-semibold">История записей</h2>
+                    <div class="flex gap-3 flex-wrap">
+                        <select id="fin-filter-type" onchange="renderFinTable()" class="p-2 border border-[#A69C97] rounded bg-white text-sm">
+                            <option value="">Все показатели</option>
+                            <option value="nkd">НДК</option>
+                            <option value="nkl">НКЛ</option>
+                            <option value="equity">Собственные средства</option>
+                        </select>
+                        <button onclick="exportFinToExcel()" class="flex items-center bg-[#4B4240] text-white py-2 px-4 rounded-lg hover:bg-[#2c2625] transition text-sm">
+                            📥 Выгрузить Excel
+                        </button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-gray-50 border-b-2 border-gray-200">
+                            <tr>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Дата</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Показатель</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Фактическое значение</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Минимум</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Статус</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Комментарий</th>
+                                <th class="p-3 text-xs font-bold text-[#7D7471]">Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fin-table-body">
+                            <tr><td colspan="7" class="p-8 text-center text-[#A69C97] italic">Нет данных. Добавьте первую запись.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- ===== КОНЕЦ: ФИНАНСОВЫЕ ПОКАЗАТЕЛИ ===== -->
+
+    </main>
+
+    <div id="delete-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 class="text-xl font-bold text-[#4B4240] mb-4">Подтвердить удаление</h2>
+            <p class="text-[#7D7471] mb-6">Вы уверены, что хотите удалить это событие из реестра? Это действие нельзя отменить.</p>
+            <div class="flex justify-end space-x-4">
+                <button id="modal-cancel-btn" class="py-2 px-4 bg-gray-200 text-[#4B4240] rounded-lg hover:bg-gray-300 transition duration-200">
+                    Отмена
+                </button>
+                <button id="modal-confirm-btn" class="py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-200">
+                    Да, удалить
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+<!-- ============================================================
+     JS МОДУЛИ — порядок подключения ВАЖЕН
+     01-db должен быть первым (данные)
+     15-init должен быть последним (запуск)
+     ============================================================ -->
+<script src="js/01-db.js"></script>
+<script src="js/02-utils.js"></script>
+<script src="js/03-charts.js"></script>
+<script src="js/04-registry.js"></script>
+<script src="js/05-ui.js"></script>
+<script src="js/06-orders.js"></script>
+<script src="js/07-complaints.js"></script>
+<script src="js/08-checks.js"></script>
+<script src="js/09-plan.js"></script>
+<script src="js/10-financials.js"></script>
+<script src="js/11-conflicts.js"></script>
+<script src="js/12-audit.js"></script>
+<script src="js/13-reports.js"></script>
+<script src="js/14-audit-patches.js"></script>
+<script src="js/16-knowledge.js"></script>
+<script src="js/18-cbr-rss.js"></script>
+<script src="js/15-init.js"></script>
+<script src="js/17-enhancements.js?v=4"></script>
+
+</body>
+</html>
